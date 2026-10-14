@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<meta name="description" content="Spend cube: suppliers resolved, spend classified, contract coverage and concentration by category.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23EEF2EF'/><rect x='2' y='2' width='17' height='28' fill='%231F6F50'/><rect x='21' y='2' width='9' height='16' fill='%23C27D1A'/><rect x='21' y='20' width='9' height='10' fill='%23E9E4D4'/></svg>">
+<style>
+@font-face {
+  font-family: "Public Sans";
+  src: url(data:font/woff2;base64,{{ font }}) format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+:root {
+  --ledger: #EEF2EF;
+  --sheet: #FFFFFF;
+  --ink: #102A23;
+  --muted: #55665E;
+  --rule: #C6D3CB;
+  --covered: #1F6F50;
+  --exposed: #C27D1A;
+  --risk: #9C2F2F;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ledger);
+  color: var(--ink);
+  font: 16px/1.55 "Public Sans", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.page { max-width: 1168px; margin: 0 auto; padding: 44px 24px 64px; }
+h1 { font-size: 2.5rem; line-height: 1.08; font-weight: 800; margin: 0; letter-spacing: -0.015em; }
+h2 { font-size: 1.4rem; font-weight: 750; margin: 0 0 6px; }
+.period { color: var(--muted); margin: 6px 0 0; }
+.verdict { font-size: 1.6rem; line-height: 1.38; max-width: 36em; margin: 32px 0 28px; font-weight: 400; }
+.verdict strong { font-weight: 750; }
+.verdict .out { color: #8A5510; }
+.facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin: 0 0 40px; border-top: 2px solid var(--ink); }
+.facts div { padding: 12px 18px 0 0; }
+.facts dt { font-size: 0.85rem; color: var(--muted); }
+.facts dd { margin: 2px 0 0; font-size: 1.75rem; font-weight: 750; line-height: 1.15; }
+.facts dd small { display: block; font-size: 0.85rem; font-weight: 400; color: var(--muted); margin-top: 3px; }
+section { margin-bottom: 52px; }
+.lede { color: var(--muted); margin: 0 0 16px; max-width: 70ch; }
+figure { margin: 0; }
+.treemap svg { display: block; width: 100%; height: auto; font-family: "Public Sans", system-ui, sans-serif; }
+.legend { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; }
+.ramp { display: flex; height: 10px; width: 220px; }
+.ramp span { flex: 1; }
+.two { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 48px; align-items: start; }
+.pareto svg { width: 100%; height: auto; font-family: "Public Sans", system-ui, sans-serif; }
+.pareto .grid { stroke: var(--rule); stroke-dasharray: 2 4; }
+.pareto .axis { font-size: 12px; fill: var(--muted); }
+.pareto .marker { stroke: var(--covered); stroke-dasharray: 4 3; }
+.pareto .callout { font-size: 14px; font-weight: 650; fill: var(--ink); }
+.findings { list-style: none; padding: 0; margin: 0; }
+.findings li { padding: 12px 0; border-bottom: 1px solid var(--rule); display: grid; grid-template-columns: 14px 1fr auto; gap: 4px 12px; }
+.findings .swatch { width: 14px; height: 14px; margin-top: 5px; }
+.findings .cat { font-weight: 650; }
+.findings .amt { font-weight: 650; text-align: right; }
+.findings .msg { grid-column: 2 / 4; color: var(--muted); font-size: 0.95rem; }
+table { width: 100%; border-collapse: collapse; background: var(--sheet); }
+th { text-align: left; font-size: 0.8rem; font-weight: 650; color: var(--muted); padding: 9px 12px; border-bottom: 2px solid var(--ink); white-space: nowrap; }
+td { padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.n { text-align: right; white-space: nowrap; }
+td .sub { display: block; font-size: 0.82rem; color: var(--muted); }
+.cov { display: inline-block; width: 46px; height: 8px; background: #E3E8E4; vertical-align: middle; margin-left: 8px; }
+.cov span { display: block; height: 100%; background: var(--covered); }
+.table-wrap { overflow-x: auto; }
+.merge { padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.merge .to { font-weight: 650; }
+.merge .from { color: var(--muted); font-size: 0.92rem; }
+.stack { display: flex; height: 26px; margin: 12px 0 10px; }
+.stack span { display: block; height: 100%; }
+.stack-legend { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 0.9rem; }
+.stack-legend i { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; }
+.method { columns: 2; column-gap: 48px; color: var(--muted); font-size: 0.95rem; }
+.method p { margin: 0 0 12px; break-inside: avoid; }
+footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.85rem; }
+footer a { color: var(--ink); }
+@media (max-width: 860px) {
+  .two { grid-template-columns: minmax(0, 1fr); }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 16px; }
+  .method { columns: 1; }
+}
+@media (max-width: 560px) {
+  .page { padding: 28px 16px 48px; }
+  h1 { font-size: 1.9rem; }
+  .verdict { font-size: 1.25rem; }
+  .treemap { overflow-x: auto; }
+  .treemap svg { min-width: 680px; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <h1>{{ title }}</h1>
+    <p class="period">Purchase order lines posted {{ first }} to {{ last }}. Amounts in euro.</p>
+  </header>
+
+  <p class="verdict">
+    <strong>{{ t.spend|eur_short }}</strong> went to <strong>{{ t.suppliers }} suppliers</strong>.
+    <span class="out"><strong>{{ (1 - t.on_contract_share)|pct }}</strong> of it was bought outside a contract</span>,
+    including <strong>{{ t.maverick_spend|eur_short }}</strong> in categories where a contract already exists.
+  </p>
+
+  <dl class="facts">
+    <div><dt>Supplier names resolved</dt><dd>{{ t.raw_names }} to {{ t.suppliers }}<small>spellings merged into suppliers</small></dd></div>
+    <div><dt>Spend classified</dt><dd>{{ t.classified_share|pct }}<small>{{ review_count }} lines left for review</small></dd></div>
+    <div><dt>Spend on contract</dt><dd>{{ t.on_contract_share|pct }}<small>by value, across all categories</small></dd></div>
+    <div><dt>Long tail</dt><dd>{{ t.tail_suppliers }} suppliers<small>share the last 5% of spend</small></dd></div>
+  </dl>
+
+  <section>
+    <h2>Where the money goes, and how much of it is under contract</h2>
+    <p class="lede">Each tile is a category, sized by spend. Ochre tiles are bought mostly outside contracts; green tiles mostly on them.</p>
+    <figure class="treemap">
+      {{ treemap|safe }}
+      <figcaption class="legend">
+        0% on contract
+        <span class="ramp" aria-hidden="true">{% for c in legend %}<span style="background: {{ c }}"></span>{% endfor %}</span>
+        100% on contract
+      </figcaption>
+    </figure>
+  </section>
+
+  <section class="two">
+    <div>
+      <h2>What to look at first</h2>
+      <p class="lede">The six largest contract and concentration problems, ranked by the spend they concern.</p>
+      <ul class="findings">
+        {% for c in findings %}
+        <li>
+          <span class="swatch" style="background: {{ c.on_contract_share|colour }}"></span>
+          <span class="cat">{{ c.category }}</span>
+          <span class="amt">{{ c.at_stake|eur_short }}</span>
+          <span class="msg">{{ c.finding }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h2>Supplier concentration</h2>
+      <p class="lede">Suppliers ranked by spend, largest first. {{ t.tail_suppliers }} suppliers together make up the last 5%: purchase cards or a catalogue would cost less to run than purchase orders.</p>
+      <figure class="pareto">{{ pareto|safe }}</figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Categories</h2>
+    <p class="lede">HHI measures concentration from 0 to 10,000; above 2,500 a few suppliers dominate, below 1,500 spend is spread thin.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Category</th><th class="n">Spend</th><th class="n">Suppliers</th><th>Largest supplier</th><th class="n">HHI</th><th class="n">On contract</th></tr>
+        </thead>
+        <tbody>
+          {% for c in categories %}
+          <tr>
+            <td>{{ c.category }}<span class="sub">{{ c.category_group }}</span></td>
+            <td class="n">{{ c.spend|eur }}</td>
+            <td class="n">{{ c.suppliers }}</td>
+            <td>{{ c.top_supplier }}<span class="sub">{{ c.top_share|pct }} of category</span></td>
+            <td class="n">{{ "{:,.0f}".format(c.hhi) }}</td>
+            <td class="n">{{ c.on_contract_share|pct }}<span class="cov" aria-hidden="true"><span style="width: {{ (c.on_contract_share * 100)|round(1) }}%"></span></span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="two">
+    <div>
+      <h2>One supplier, many names</h2>
+      <p class="lede">The largest suppliers and the spellings that were merged into them.</p>
+      {% for m in merges %}
+      <div class="merge">
+        <div class="to">{{ m.supplier }} <span class="sub" style="color: var(--muted); font-weight: 400">{{ m.spend|eur_short }}</span></div>
+        <div class="from">{{ m.spellings|join("; ") }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div>
+      <h2>How each line was classified</h2>
+      <p class="lede">Share of spend by the layer that assigned its category.</p>
+      <div class="stack" role="img" aria-label="Classification sources">
+        {% for s in sources %}<span style="width: {{ (s.share * 100)|round(2) }}%; background: {{ s.colour }}" title="{{ s.label }}: {{ s.share|pct }}"></span>{% endfor %}
+      </div>
+      <div class="stack-legend">
+        {% for s in sources %}<span><i style="background: {{ s.colour }}"></i>{{ s.label }} {{ s.share|pct }}</span>{% endfor %}
+      </div>
+      <h2 style="margin-top: 32px">Review queue</h2>
+      <p class="lede">{{ review_count }} lines worth {{ review_value|eur_short }} have no category or a low-confidence one. The largest:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Supplier</th><th>Description</th><th class="n">Amount</th></tr></thead>
+          <tbody>
+            {% for r in review %}
+            <tr><td>{{ r.supplier }}</td><td>{{ r.description }}</td><td class="n">{{ r.amount_eur|eur }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Method</h2>
+    <div class="method">
+      <p><strong>Suppliers.</strong> Names are folded (umlauts, case, punctuation), legal forms and locations removed, then matched within each country by fuzzy similarity and joined with union-find. A guard stops merges when the words that differ are unrelated, so "Becker Elektro" and "Becker Druck" stay apart.</p>
+      <p><strong>Categories.</strong> Keyword rules in English and German come first. Lines a rule cannot place inherit the category of their supplier when at least 80% of that supplier's classified spend sits in one category. An optional language model handles what remains, seeing only line descriptions, never supplier names or amounts.</p>
+      <p><strong>Contracts.</strong> A line counts as on contract when its purchase order references a contract. Spend outside contracts in a category that has a contract is reported as leakage.</p>
+      <p><strong>Concentration.</strong> HHI is the sum of squared supplier shares within a category, on a 0 to 10,000 scale. The long tail is the set of smallest suppliers that together account for 5% of spend.</p>
+    </div>
+  </section>
+
+  <footer>
+    Generated {{ generated }} by <a href="https://github.com/awaisq5/procurement-spend-cube">procurement-spend-cube</a>. Sample data is synthetic; supplier names are invented. The extracts behind this report are in classified_lines.csv, supplier_map.csv and review_queue.csv.
+  </footer>
+</main>
+</body>
+</html>
