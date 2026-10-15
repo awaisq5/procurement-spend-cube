@@ -67,9 +67,10 @@ def match_suppliers(lines: pd.DataFrame, threshold: float = 90.0) -> SupplierMat
     keys["cluster"] = [uf.find(i) for i in range(len(keys))]
     raw = raw.merge(keys, on=["key", "supplier_country"])
 
-    # The display name is the spelling that carries the most spend.
+    # The display name is the cleanest spelling: not all capitals, no location suffix, then the most used.
+    raw["clean"] = ~raw.supplier_name.str.isupper() & ~raw.supplier_name.str.contains(r"\(", regex=True)
     canonical = (
-        raw.sort_values("amount_eur", ascending=False)
+        raw.sort_values(["clean", "lines", "amount_eur"], ascending=[False, False, False])
         .groupby("cluster")
         .agg(
             supplier=("supplier_name", "first"),
@@ -102,4 +103,7 @@ def _compatible(a: str, b: str) -> bool:
     if not only_a or not only_b:
         # One name is the other plus extra words, e.g. "kessler partner" vs "kessler partner beratung".
         return True
-    return fuzz.ratio(" ".join(sorted(only_a)), " ".join(sorted(only_b))) >= 75
+    a_rest, b_rest = " ".join(sorted(only_a)), " ".join(sorted(only_b))
+    # In short words one letter is a large share of the identity: "Schulz" and "Scholz" are different people.
+    threshold = 85 if max(len(a_rest), len(b_rest)) <= 6 else 75
+    return fuzz.ratio(a_rest, b_rest) >= threshold

@@ -16,12 +16,27 @@ class Cube:
     pareto: pd.DataFrame
     quarters: pd.DataFrame
     merges: pd.DataFrame
+    groups: pd.DataFrame
 
 
-def build_cube(lines: pd.DataFrame, supplier_map: pd.DataFrame) -> Cube:
+def build_cube(lines: pd.DataFrame, supplier_map: pd.DataFrame, membership: pd.DataFrame | None = None) -> Cube:
+    if membership is None:
+        ids = lines[["supplier_id", "supplier"]].drop_duplicates("supplier_id")
+        membership = pd.DataFrame(
+            {"supplier_id": ids.supplier_id, "group": ids.supplier, "share": 1.0, "joint_venture": False}
+        )
     con = duckdb.connect()
     con.register("lines", lines)
     con.register("supplier_map", supplier_map)
+    con.register("membership", membership)
+    # Lines as seen by group: a joint venture's spend is split between its owners by share.
+    con.sql(
+        """
+        CREATE TEMP VIEW group_lines AS
+        SELECT l.*, m."group" AS grp, m.share, l.amount_eur * m.share AS group_eur, m.joint_venture
+        FROM lines l JOIN membership m USING (supplier_id)
+        """
+    )
 
     totals = (
         con.sql(
@@ -74,6 +89,27 @@ def build_cube(lines: pd.DataFrame, supplier_map: pd.DataFrame) -> Cube:
         ORDER BY spend DESC
         """
     ).df()
+
+    # The same concentration measured at group level: subsidiaries count as one.
+    by_group = con.sql(
+        """
+        WITH g AS (
+          SELECT category_id, grp, SUM(group_eur) AS spend, COUNT(DISTINCT supplier_id) AS members
+          FROM group_lines WHERE category_id <> 'UNCLASSIFIED' GROUP BY ALL
+        ),
+        s AS (
+          SELECT *, spend / SUM(spend) OVER (PARTITION BY category_id) AS share,
+                 ROW_NUMBER() OVER (PARTITION BY category_id ORDER BY spend DESC) AS rank
+          FROM g
+        )
+        SELECT category_id, COUNT(*) AS groups, MAX(share) AS group_top_share,
+               ANY_VALUE(grp) FILTER (WHERE rank = 1) AS top_group,
+               ANY_VALUE(members) FILTER (WHERE rank = 1) AS top_group_members,
+               ROUND(10000 * SUM(share * share)) AS group_hhi
+        FROM s GROUP BY category_id
+        """
+    ).df()
+    categories = categories.merge(by_group, on="category_id", how="left")
     findings = categories.apply(_finding, axis=1, result_type="expand")
     categories["finding"], categories["at_stake"] = findings[0], findings[1]
 
@@ -102,6 +138,19 @@ def build_cube(lines: pd.DataFrame, supplier_map: pd.DataFrame) -> Cube:
         """
     ).df()
 
+    groups = con.sql(
+        """
+        SELECT grp AS "group", SUM(group_eur) AS spend, COUNT(DISTINCT supplier_id) AS members,
+               COUNT(DISTINCT supplier_country) AS countries,
+               LIST(DISTINCT supplier ORDER BY supplier) AS member_names,
+               BOOL_OR(joint_venture) AS has_joint_venture,
+               COALESCE(SUM(group_eur) FILTER (WHERE on_contract), 0) / SUM(group_eur) AS on_contract_share
+        FROM group_lines GROUP BY grp ORDER BY spend DESC
+        """
+    ).df()
+    totals["groups"] = len(groups)
+    totals["multi_member_groups"] = int((groups.members > 1).sum())
+
     merges = con.sql(
         """
         SELECT m.supplier_id, ANY_VALUE(m.supplier) AS supplier,
@@ -128,7 +177,7 @@ def build_cube(lines: pd.DataFrame, supplier_map: pd.DataFrame) -> Cube:
         ).fetchone()[0]
     )
     con.close()
-    return Cube(totals, categories, suppliers, pareto, quarters, merges)
+    return Cube(totals, categories, suppliers, pareto, quarters, merges, groups)
 
 
 MATERIAL_EUR = 100_000
@@ -143,6 +192,11 @@ def _finding(row: pd.Series) -> tuple[str, float]:
     if row.spend < MATERIAL_EUR:
         return "", 0.0
     off_contract = row.spend * (1 - row.on_contract_share)
+    if row.top_share < 0.5 and row.group_top_share >= 0.5 and row.top_group_members > 1:
+        return (
+            f"Looks spread across {row.suppliers} suppliers, but {row.top_group} holds "
+            f"{row.group_top_share:.0%} through {int(row.top_group_members)} of them."
+        ), row.spend * row.group_top_share
     if not row.contract_exists and (row.suppliers == 1 or row.top_share >= 0.9):
         return (
             f"{row.top_supplier} supplies {row.top_share:.0%} with no contract: no agreed terms, no fallback.",

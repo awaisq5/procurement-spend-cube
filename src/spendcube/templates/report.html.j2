@@ -68,6 +68,7 @@ th { text-align: left; font-size: 0.8rem; font-weight: 650; color: var(--muted);
 td { padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
 .n { text-align: right; white-space: nowrap; }
 td .sub { display: block; font-size: 0.82rem; color: var(--muted); }
+td.up { color: var(--risk); font-weight: 650; }
 .cov { display: inline-block; width: 46px; height: 8px; background: #E3E8E4; vertical-align: middle; margin-left: 8px; }
 .cov span { display: block; height: 100%; background: var(--covered); }
 .table-wrap { overflow-x: auto; }
@@ -100,7 +101,7 @@ footer a { color: var(--ink); }
 <main class="page">
   <header>
     <h1>{{ title }}</h1>
-    <p class="period">Purchase order lines posted {{ first }} to {{ last }}. Amounts in euro.</p>
+    <p class="period">Purchase order lines posted {{ first }} to {{ last }}. Amounts in euro.{% if scope|length <= 3 %} Scope: {{ scope|join(", ") }}.{% endif %}</p>
   </header>
 
   <p class="verdict">
@@ -110,7 +111,7 @@ footer a { color: var(--ink); }
   </p>
 
   <dl class="facts">
-    <div><dt>Supplier names resolved</dt><dd>{{ t.raw_names }} to {{ t.suppliers }}<small>spellings merged into suppliers</small></dd></div>
+    <div><dt>Supplier names resolved</dt><dd>{{ t.raw_names }} to {{ t.suppliers }}<small>spellings merged into suppliers{% if t.multi_member_groups %}, in {{ t.groups }} groups{% endif %}</small></dd></div>
     <div><dt>Spend classified</dt><dd>{{ t.classified_share|pct }}<small>{{ review_count }} lines left for review</small></dd></div>
     <div><dt>Spend on contract</dt><dd>{{ t.on_contract_share|pct }}<small>by value, across all categories</small></dd></div>
     <div><dt>Long tail</dt><dd>{{ t.tail_suppliers }} suppliers<small>share the last 5% of spend</small></dd></div>
@@ -151,13 +152,40 @@ footer a { color: var(--ink); }
     </div>
   </section>
 
+  {% if groups %}
+  <section>
+    <h2>Supplier groups</h2>
+    <p class="lede">Subsidiaries and joint ventures rolled up to their parent group. Joint-venture spend is split between the owners by their share.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Group</th><th class="n">Spend</th><th class="n">Companies</th><th class="n">Countries</th><th class="n">On contract</th></tr></thead>
+        <tbody>
+          {% for g in groups %}
+          <tr>
+            <td>{{ g.group }}<span class="sub">{{ g.member_names|join("; ") }}{% if g.has_joint_venture %} (includes a joint venture share){% endif %}</span></td>
+            <td class="n">{{ g.spend|eur }}</td>
+            <td class="n">{{ g.members }}</td>
+            <td class="n">{{ g.countries }}</td>
+            <td class="n">{{ g.on_contract_share|pct }}<span class="cov" aria-hidden="true"><span style="width: {{ (g.on_contract_share * 100)|round(1) }}%"></span></span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if suggestions %}
+    <p class="lede" style="margin-top: 16px"><strong>Possibly related, not in the group map:</strong>
+      {% for s in suggestions %}{{ s.suppliers }} ({{ s.spend|eur_short }}){% if not loop.last %}; {% endif %}{% endfor %}. Check and add them to the map if they belong together.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
   <section>
     <h2>Categories</h2>
-    <p class="lede">HHI measures concentration from 0 to 10,000; above 2,500 a few suppliers dominate, below 1,500 spend is spread thin.</p>
+    <p class="lede">HHI measures concentration from 0 to 10,000; above 2,500 a few suppliers dominate, below 1,500 spend is spread thin. Group HHI counts companies of the same group as one.</p>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Category</th><th class="n">Spend</th><th class="n">Suppliers</th><th>Largest supplier</th><th class="n">HHI</th><th class="n">On contract</th></tr>
+          <tr><th>Category</th><th class="n">Spend</th><th class="n">Suppliers</th><th>Largest supplier</th><th class="n">HHI</th><th class="n">Group HHI</th><th class="n">On contract</th></tr>
         </thead>
         <tbody>
           {% for c in categories %}
@@ -167,6 +195,7 @@ footer a { color: var(--ink); }
             <td class="n">{{ c.suppliers }}</td>
             <td>{{ c.top_supplier }}<span class="sub">{{ c.top_share|pct }} of category</span></td>
             <td class="n">{{ "{:,.0f}".format(c.hhi) }}</td>
+            <td class="n{% if c.group_hhi > c.hhi + 500 %} up{% endif %}">{{ "{:,.0f}".format(c.group_hhi) }}</td>
             <td class="n">{{ c.on_contract_share|pct }}<span class="cov" aria-hidden="true"><span style="width: {{ (c.on_contract_share * 100)|round(1) }}%"></span></span></td>
           </tr>
           {% endfor %}
@@ -215,6 +244,7 @@ footer a { color: var(--ink); }
     <div class="method">
       <p><strong>Suppliers.</strong> Names are folded (umlauts, case, punctuation), legal forms and locations removed, then matched within each country by fuzzy similarity and joined with union-find. A guard stops merges when the words that differ are unrelated, so "Becker Elektro" and "Becker Druck" stay apart.</p>
       <p><strong>Categories.</strong> Keyword rules in English and German come first. Lines a rule cannot place inherit the category of their supplier when at least 80% of that supplier's classified spend sits in one category. An optional language model handles what remains, seeing only line descriptions, never supplier names or amounts.</p>
+      <p><strong>Groups.</strong> A group map assigns suppliers to their parent group, with an ownership share for joint ventures. Suppliers not in the map are their own group. Suppliers in different countries whose names start with the same distinctive word, but share no group, are listed for review.</p>
       <p><strong>Contracts.</strong> A line counts as on contract when its purchase order references a contract. Spend outside contracts in a category that has a contract is reported as leakage.</p>
       <p><strong>Concentration.</strong> HHI is the sum of squared supplier shares within a category, on a 0 to 10,000 scale. The long tail is the set of smallest suppliers that together account for 5% of spend.</p>
     </div>

@@ -39,6 +39,9 @@ def render(result: Result, cube: Cube, title: str = "Indirect spend review") -> 
         .head(6)
         .to_dict("records"),
         merges=cube.merges.head(8).to_dict("records"),
+        groups=cube.groups[cube.groups.members > 1].to_dict("records"),
+        suggestions=result.groups.suggestions.to_dict("records"),
+        scope=sorted(set(result.lines.category_group) - {"Unclassified"}),
         review=result.review.head(12).to_dict("records"),
         review_count=len(result.review),
         review_value=float(result.review.amount_eur.sum()),
@@ -79,7 +82,15 @@ def write_outputs(result: Result, cube: Cube, out_dir: Path, title: str = "Indir
     result.supplier_map.to_csv(out_dir / "supplier_map.csv", index=False)
     result.review.to_csv(out_dir / "review_queue.csv", index=False)
     cube.categories.to_csv(out_dir / "categories.csv", index=False)
+    cube.groups.assign(member_names=cube.groups.member_names.map("; ".join)).to_csv(out_dir / "groups.csv", index=False)
     return [
         out_dir / n
-        for n in ["index.html", "classified_lines.csv", "supplier_map.csv", "review_queue.csv", "categories.csv"]
+        for n in [
+            "index.html",
+            "classified_lines.csv",
+            "supplier_map.csv",
+            "review_queue.csv",
+            "categories.csv",
+            "groups.csv",
+        ]
     ]

@@ -22,15 +22,19 @@ MAJOR = [
     ("Brightwater Advisory Ltd", "GB", {"PS-CON": 1}, 22, False),
     ("Kessler & Partner Beratung GmbH", "DE", {"PS-CON": 1}, 30, False),
     ("Northbridge Consulting Inc", "US", {"PS-CON": 0.8, "HR-TRN": 0.2}, 14, False),
+    ("KP Advisory UK Ltd", "GB", {"PS-CON": 1}, 18, False),
+    ("Brightwater Advisory Inc", "US", {"PS-CON": 1}, 10, False),
     ("Hartmann Rechtsanwälte PartG mbB", "DE", {"PS-LEG": 1}, 18, False),
     ("Calder Fyfe LLP", "GB", {"PS-LEG": 1}, 12, False),
     ("Albrecht Treuhand GmbH", "DE", {"PS-AUD": 1}, 10, True),
     ("Müller Engineering GmbH & Co. KG", "DE", {"PS-ENG": 1}, 60, True),
     ("Tidewell Engineering Ltd", "GB", {"PS-ENG": 1}, 34, True),
     ("Stavik Ingeniørtjenester AS", "NO", {"PS-ENG": 1}, 20, False),
+    ("Tidewell Stavik Engineering JV AS", "NO", {"PS-ENG": 1}, 18, True),
     ("FlexForce Personaldienstleistungen GmbH", "DE", {"LB-CTR": 1}, 96, True),
     ("Granite Staffing Ltd", "GB", {"LB-CTR": 1}, 60, True),
     ("Nordlys Bemanning AS", "NO", {"LB-CTR": 1}, 30, False),
+    ("Granite Staffing Middle East LLC", "AE", {"LB-CTR": 1}, 26, False),
     ("Talentbrücke GmbH", "DE", {"LB-REC": 1}, 12, False),
     ("Cloudmere Software Inc", "US", {"IT-SW": 1}, 24, True),
     ("Datavane GmbH", "DE", {"IT-SW": 0.7, "IT-SVC": 0.3}, 30, True),
@@ -280,7 +284,7 @@ def main() -> None:
     for idx, (name, country, cats, per_year, has_contract) in enumerate(MAJOR):
         sid = f"T{idx:03d}"
         names = spellings(name)
-        weights = np.array([0.55] + [0.45 / (len(names) - 1)] * (len(names) - 1)) if len(names) > 1 else np.array([1.0])
+        weights = np.array([0.7] + [0.3 / (len(names) - 1)] * (len(names) - 1)) if len(names) > 1 else np.array([1.0])
         n_lines = int(per_year * 1.75 * rng.uniform(0.8, 1.2))
         contract = f"CW-{2400 + idx}" if has_contract else None
         cat_ids, cat_w = list(cats), np.array(list(cats.values()))
@@ -321,6 +325,25 @@ def main() -> None:
     with open(OUT / "fx_rates.csv", "w", newline="", encoding="utf-8") as f:
         f.write("currency,eur_per_unit\n")
         f.writelines(f"{c},{r}\n" for c, r in FX.items())
+
+    # Corporate structure: subsidiaries under other names, an acquisition, and a 50/50 joint venture.
+    # Brightwater's US subsidiary is deliberately left out, for the review suggestions to find.
+    groups = [
+        ("Kessler & Partner Beratung GmbH", "DE", "Kessler Northbridge Group", 1),
+        ("Northbridge Consulting Inc", "US", "Kessler Northbridge Group", 1),
+        ("KP Advisory UK Ltd", "GB", "Kessler Northbridge Group", 1),
+        ("Granite Staffing Ltd", "GB", "Granite Workforce Group", 1),
+        ("Granite Staffing Middle East LLC", "AE", "Granite Workforce Group", 1),
+        ("Nordlys Bemanning AS", "NO", "Granite Workforce Group", 1),
+        ("Tidewell Engineering Ltd", "GB", "Tidewell Group", 1),
+        ("Tidewell Stavik Engineering JV AS", "NO", "Tidewell Group", 0.5),
+        ("Tidewell Stavik Engineering JV AS", "NO", "Stavik Group", 0.5),
+        ("Stavik Ingeniørtjenester AS", "NO", "Stavik Group", 1),
+    ]
+    with open(OUT / "supplier_groups.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["supplier", "country", "group", "share"])
+        writer.writerows(groups)
 
     names = {r["supplier_name"] for r in rows}
     print(f"{len(rows)} lines, {len(names)} supplier spellings for {len(MAJOR) + tail_id} real suppliers")

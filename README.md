@@ -6,15 +6,21 @@ Before a procurement team can negotiate, it needs to know what it buys and from 
 
 ![Report: verdict sentence, key figures and a treemap of categories coloured by contract coverage](docs/report-top.png)
 
-## Why I built it
+## Where this comes from
 
-In a global commodity rotation I normalised supplier data to identify $365M of indirect on-contract spend across professional and labour services. Most of that work was cleaning: deciding which supplier names are the same company, and which category a line belongs to. This project automates those steps and, unlike a spreadsheet, measures how accurate it is.
+In a global commodity rotation I built the list of normalised supplier names for professional services, programmes and labour, grouping companies, subsidiaries and joint ventures under their parent group, to estimate the indirect spend for the year: $365M on contract, 26% of the recorded spend. Most of that work was cleaning: deciding which supplier names are the same company, which companies belong to the same group, and which category a line belongs to.
+
+This project automates those steps, adds the group roll-up as a first-class feature, and, unlike a spreadsheet, measures its own accuracy. **All data in this repository is synthetic**; supplier names are invented.
 
 ## What it does
 
 **1. Resolves supplier names.** Names are folded (umlauts, case, punctuation), legal forms and locations are stripped, and the result is matched by fuzzy similarity within each country, then joined with union-find. A guard keeps "Becker Elektro" and "Becker Druck" apart even though they share a name.
 
-**2. Classifies spend in three layers, cheapest and most explainable first:**
+**2. Rolls suppliers up to their parent group.** Spelling is one problem, corporate structure another: a group buys through subsidiaries in several countries under names that share little, and a joint venture belongs to two groups at once. A small group map (supplier, country, group, ownership share) assigns each supplier to its group; joint-venture spend is split by share. Suppliers in different countries whose names start with the same word, but share no group, are listed for review. The roll-up changes the findings: a category that looks spread across 15 suppliers can turn out to be 60% with one group.
+
+![Supplier groups with joint-venture shares and a suggested relation to review](docs/groups.png)
+
+**3. Classifies spend in three layers, cheapest and most explainable first:**
 
 | Layer | How | Why |
 |---|---|---|
@@ -31,9 +37,9 @@ The language model layer is built to be safe to point at real company data:
 
 Every line records which layer classified it and with what confidence.
 
-**3. Builds the cube in DuckDB.** SQL computes contract coverage, concentration (HHI) per category, the supplier Pareto curve, the long tail, and leakage: spend outside contracts in categories where a contract exists.
+**4. Builds the cube in DuckDB.** SQL computes contract coverage, concentration (HHI) per category at supplier and at group level, the supplier Pareto curve, the long tail, and leakage: spend outside contracts in categories where a contract exists.
 
-**4. Writes a report** as one self-contained HTML file (charts are hand-built SVG, the font is embedded), plus CSV extracts: classified lines, supplier map, categories and a review queue sorted by value.
+**5. Writes a report** as one self-contained HTML file (charts are hand-built SVG, the font is embedded), plus CSV extracts: classified lines, supplier map, groups, categories and a review queue sorted by value. `--scope "Professional services,Labour"` limits the cube to chosen category groups, as for a PSP and labour review.
 
 ## How accurate is it?
 
@@ -41,10 +47,10 @@ The sample data comes with ground truth for every line, so accuracy is measured,
 
 ```text
 $ spendcube evaluate data/spend_lines.csv --fx data/fx_rates.csv --truth data/ground_truth.csv
-Supplier matching   precision 100.0%   recall 97.6%
-Classification      precision 99.9%   coverage 91.3%
-  rule        2083 lines   100.0% correct
-  supplier     383 lines   99.5% correct
+Supplier matching   precision 100.0%   recall 100.0%
+Classification      precision 99.8%   coverage 92.5%
+  rule        2173 lines   100.0% correct
+  supplier     401 lines   98.8% correct
 ```
 
 Read these numbers with care: the synthetic descriptions are cleaner than real ones, so rule precision on a real export will be lower. The value is the harness. Label a few hundred real lines, run `evaluate`, and you know where you stand before anyone relies on the cube. Tests fail if accuracy on the sample drops below set thresholds.
@@ -55,7 +61,11 @@ Read these numbers with care: the synthetic descriptions are cleaner than real o
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-spendcube run data/spend_lines.csv --fx data/fx_rates.csv --out report
+spendcube run data/spend_lines.csv --fx data/fx_rates.csv --groups data/supplier_groups.csv --out report
+
+# Professional services and labour only
+spendcube run data/spend_lines.csv --fx data/fx_rates.csv --groups data/supplier_groups.csv \
+  --scope "Professional services,Labour" --title "Professional services and labour spend" --out psp
 open report/index.html
 
 # Optional: classify leftovers with a language model
@@ -76,6 +86,8 @@ A purchase order line export (SAP ME2N/ME80FN or an Ariba spend report both work
 | `description`, `amount`, `currency` | yes | any currency listed in the rates file |
 | `contract_id` | no | blank means off contract |
 
+The optional group map (`--groups`) has the columns `supplier, country, group, share`; `share` defaults to 1 and is below 1 only for joint ventures.
+
 Exchange rates come from a small CSV (`currency, eur_per_unit`). The sample rates are illustrative.
 
 ## Project structure
@@ -83,6 +95,7 @@ Exchange rates come from a small CSV (`currency, eur_per_unit`). The sample rate
 ```
 src/spendcube/text.py        name and description normalisation
 src/spendcube/suppliers.py   fuzzy supplier matching with union-find
+src/spendcube/groups.py      roll-up to parent groups, joint-venture shares, review suggestions
 src/spendcube/taxonomy.py    24 indirect categories, English and German keywords
 src/spendcube/classify.py    rules, supplier profile, language model layer with cache
 src/spendcube/analytics.py   the cube in DuckDB SQL, findings per category
@@ -95,7 +108,8 @@ scripts/make_sample_data.py  synthetic export with ground truth
 ## Limits and next steps
 
 - The taxonomy is a compact indirect-spend tree. Mapping it to UNSPSC codes would let the cube compare with benchmarks.
-- Matching works within a country. A group supplier invoicing from several countries appears once per country, which is often what a buyer wants, but not always.
+- Matching works within a country, and group membership comes from the map, because corporate structure cannot be read from names. Linking the map to a company register or a D&B family tree would keep it current.
+- Fuzzy matching on short names needs care: "Schulz" and "Scholz" differ by one letter. Short distinguishing words get a stricter threshold, and the evaluation harness is how you find out whether that is strict enough for your data.
 - Supplier risk signals (financial health, sanctions lists) would sit naturally next to the concentration findings.
 
 ## License

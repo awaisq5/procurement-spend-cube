@@ -17,8 +17,10 @@ import pandas as pd
 from .analytics import build_cube
 from .classify import PRESETS, LlmClassifier, LlmConfig
 from .evaluate import evaluate
+from .groups import GroupMapError, load_group_map
 from .pipeline import InputError, load_fx, load_lines, run
 from .report import write_outputs
+from .taxonomy import CATEGORIES
 
 
 def _llm(args: argparse.Namespace) -> LlmClassifier | None:
@@ -42,16 +44,24 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--llm", choices=sorted(PRESETS), help="classify leftovers with a language model")
         p.add_argument("--model", help="override the preset model name")
         p.add_argument("--cache", default=".spendcube-cache.json", help="where language model answers are cached")
+        p.add_argument(
+            "--groups", help="CSV with supplier, country, group, share: rolls subsidiaries and JVs up to groups"
+        )
         if name == "run":
             p.add_argument("--out", default="report", help="output folder")
             p.add_argument("--title", default="Indirect spend review")
+            p.add_argument(
+                "--scope",
+                help='limit the cube to category groups, e.g. "Professional services,Labour"',
+            )
         else:
             p.add_argument("--truth", required=True, help="CSV with po_number, true_supplier, true_category")
     args = parser.parse_args(argv)
 
     try:
         lines = load_lines(args.lines, load_fx(args.fx))
-        result = run(lines, _llm(args))
+        group_map = load_group_map(args.groups) if args.groups else None
+        result = run(lines, _llm(args), group_map=group_map)
         if args.command == "evaluate":
             truth = pd.read_csv(args.truth, dtype={"po_number": str})
             s = evaluate(result.lines, truth)
@@ -60,17 +70,27 @@ def main(argv: list[str] | None = None) -> int:
             for source, (n, acc) in sorted(s.by_source.items()):
                 print(f"  {source:<10} {n:>5} lines   {acc:.1%} correct")
             return 0
-        cube = build_cube(result.lines, result.supplier_map)
+        if args.scope:
+            scope = [s.strip() for s in args.scope.split(",") if s.strip()]
+            unknown = sorted(set(scope) - {c.group for c in CATEGORIES})
+            if unknown:
+                raise InputError(f"Unknown category group: {', '.join(unknown)}.")
+            result = result.scoped(scope)
+        cube = build_cube(result.lines, result.supplier_map, result.groups.membership)
         files = write_outputs(result, cube, Path(args.out), args.title)
         t = cube.totals
-        print(f"{len(lines):,} lines, €{t['spend']:,.0f}")
-        print(f"{t['raw_names']} supplier spellings resolved to {t['suppliers']} suppliers")
+        print(f"{len(result.lines):,} lines, €{t['spend']:,.0f}, {t['on_contract_share']:.0%} on contract")
+        print(f"{t['raw_names']} supplier spellings resolved to {t['suppliers']} suppliers in {t['groups']} groups")
+        for w in result.groups.unmatched:
+            print(f"  group map: {w!r} matched no supplier in the data")
+        if len(result.groups.suggestions):
+            print(f"  {len(result.groups.suggestions)} possible group relation(s) to review, see the report")
         print(f"{t['classified_share']:.1%} of spend classified, {len(result.review)} lines to review")
         if result.llm_calls:
             print(f"{result.llm_calls} language model requests")
         print("Wrote " + ", ".join(str(f) for f in files))
         return 0
-    except (InputError, FileNotFoundError) as exc:
+    except (InputError, GroupMapError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

@@ -8,12 +8,25 @@ import pytest
 from spendcube.analytics import build_cube
 from spendcube.classify import LlmClassifier, LlmConfig, apply_llm, apply_supplier_profile, classify_description
 from spendcube.evaluate import evaluate
+from spendcube.groups import GroupMapError, load_group_map, roll_up
 from spendcube.pipeline import InputError, load_fx, load_lines, run
 from spendcube.report import render
 from spendcube.suppliers import match_suppliers
 from spendcube.text import supplier_key
 
 DATA = Path(__file__).resolve().parent.parent / "data"
+REQUIRED_COLS = [
+    "po_number",
+    "posting_date",
+    "supplier_name",
+    "supplier_country",
+    "description",
+    "amount",
+    "currency",
+    "amount_eur",
+    "contract_id",
+    "on_contract",
+]
 
 
 def frame(names, country="DE", amounts=None):
@@ -195,3 +208,74 @@ class TestPipeline:
         )
         with pytest.raises(InputError, match="CHF"):
             load_lines(bad, {"EUR": 1.0})
+
+
+class TestGroups:
+    def suppliers(self, rows):
+        lines = pd.DataFrame(rows, columns=["supplier_name", "supplier_country", "amount_eur"])
+        return match_suppliers(lines)
+
+    def gm(self, text, tmp_path):
+        p = tmp_path / "groups.csv"
+        p.write_text(text)
+        return load_group_map(p)
+
+    def test_rolls_differently_named_subsidiaries_up_to_one_group(self, tmp_path):
+        m = self.suppliers([("Kessler Beratung GmbH", "DE", 100.0), ("Northbridge Consulting Inc", "US", 50.0)])
+        gm = self.gm(
+            "supplier,country,group\nKessler Beratung GmbH,DE,Kessler Group\nNorthbridge Consulting,US,Kessler Group\n",
+            tmp_path,
+        )
+        r = roll_up(m.mapping, m.suppliers, gm)
+        assert set(r.membership.group) == {"Kessler Group"}
+        assert r.unmatched == []
+
+    def test_splits_a_joint_venture_between_its_owners(self, tmp_path):
+        m = self.suppliers([("Alpha Beta JV AS", "NO", 100.0)])
+        gm = self.gm(
+            "supplier,country,group,share\nAlpha Beta JV AS,NO,Alpha,0.6\nAlpha Beta JV AS,NO,Beta,0.4\n", tmp_path
+        )
+        r = roll_up(m.mapping, m.suppliers, gm)
+        assert dict(zip(r.membership.group, r.membership.share, strict=True)) == {"Alpha": 0.6, "Beta": 0.4}
+        assert r.membership.joint_venture.all()
+
+    def test_refuses_shares_above_one(self, tmp_path):
+        with pytest.raises(GroupMapError, match="add up to 1.30"):
+            self.gm("supplier,group,share\nX AS,A,0.7\nX AS,B,0.6\n", tmp_path)
+
+    def test_reports_map_rows_that_match_nothing(self, tmp_path):
+        m = self.suppliers([("Alpha AS", "NO", 1.0)])
+        r = roll_up(m.mapping, m.suppliers, self.gm("supplier,group\nGhost Ltd,G\n", tmp_path))
+        assert r.unmatched == ["Ghost Ltd"]
+
+    def test_suggests_same_named_suppliers_in_other_countries(self):
+        m = self.suppliers([("Brightwater Advisory Ltd", "GB", 10.0), ("Brightwater Advisory Inc", "US", 5.0)])
+        r = roll_up(m.mapping, m.suppliers, None)
+        assert "Brightwater Advisory Inc (US)" in r.suggestions.suppliers.iloc[0]
+
+    def test_group_concentration_reveals_what_supplier_concentration_hides(self, result):
+        grouped = run(result.lines[REQUIRED_COLS], group_map=load_group_map(DATA / "supplier_groups.csv"))
+        cube = build_cube(grouped.lines, grouped.supplier_map, grouped.groups.membership)
+        consulting = cube.categories.set_index("category").loc["Consulting"]
+        assert consulting.group_top_share > consulting.top_share
+        assert consulting.top_group == "Kessler Northbridge Group"
+        assert "through 3 of them" in consulting.finding
+        assert cube.totals["spend"] == pytest.approx(cube.groups.spend.sum())
+
+    def test_scope_limits_the_cube(self, result):
+        scoped = result.scoped(["Professional services", "Labour"])
+        assert set(scoped.lines.category_group) == {"Professional services", "Labour"}
+        cube = build_cube(scoped.lines, scoped.supplier_map, scoped.groups.membership)
+        assert cube.totals["spend"] == pytest.approx(scoped.lines.amount_eur.sum())
+
+
+def test_cli_runs_with_groups_and_scope(tmp_path, capsys):
+    from spendcube.cli import main
+
+    args = ["run", str(DATA / "spend_lines.csv"), "--fx", str(DATA / "fx_rates.csv"), "--out", str(tmp_path)]
+    code = main([*args, "--groups", str(DATA / "supplier_groups.csv"), "--scope", "Professional services,Labour"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "in 22 groups" in out
+    assert (tmp_path / "groups.csv").exists()
+    assert main([*args, "--scope", "Consultng"]) == 2

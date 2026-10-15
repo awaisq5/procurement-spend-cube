@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from .classify import LlmClassifier, apply_llm, apply_rules, apply_supplier_profile
+from .groups import GroupRollup, roll_up
 from .suppliers import match_suppliers
 from .taxonomy import BY_ID, UNCLASSIFIED
 
@@ -24,7 +25,22 @@ class Result:
     suppliers: pd.DataFrame
     supplier_map: pd.DataFrame
     review: pd.DataFrame
+    groups: GroupRollup
     llm_calls: int = 0
+
+    def scoped(self, category_groups: list[str]) -> Result:
+        """The same result limited to some category groups, e.g. professional services and labour."""
+        keep = self.lines.category_group.isin(category_groups)
+        lines = self.lines[keep]
+        ids = set(lines.supplier_id)
+        return Result(
+            lines=lines,
+            suppliers=self.suppliers[self.suppliers.supplier_id.isin(ids)],
+            supplier_map=self.supplier_map[self.supplier_map.supplier_id.isin(ids)],
+            review=self.review[self.review.po_number.isin(set(lines.po_number))],
+            groups=self.groups,
+            llm_calls=self.llm_calls,
+        )
 
 
 def load_lines(path: str | Path, fx: dict[str, float]) -> pd.DataFrame:
@@ -58,8 +74,14 @@ def load_fx(path: str | Path) -> dict[str, float]:
     return dict(zip(rates.currency.str.upper(), rates.eur_per_unit.astype(float), strict=True))
 
 
-def run(lines: pd.DataFrame, llm: LlmClassifier | None = None, review_below: float = 0.6) -> Result:
+def run(
+    lines: pd.DataFrame,
+    llm: LlmClassifier | None = None,
+    review_below: float = 0.6,
+    group_map: pd.DataFrame | None = None,
+) -> Result:
     match = match_suppliers(lines)
+    groups = roll_up(match.mapping, match.suppliers, group_map)
     df = lines.merge(
         match.mapping[["supplier_name", "supplier_country", "supplier_id", "supplier"]],
         on=["supplier_name", "supplier_country"],
@@ -96,5 +118,6 @@ def run(lines: pd.DataFrame, llm: LlmClassifier | None = None, review_below: flo
         suppliers=match.suppliers,
         supplier_map=match.mapping,
         review=review,
+        groups=groups,
         llm_calls=llm.calls if llm else 0,
     )
