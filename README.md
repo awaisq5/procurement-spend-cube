@@ -8,9 +8,11 @@ Before a procurement team can negotiate, it needs to know what it buys and from 
 
 ## Where this comes from
 
-In a global commodity rotation I built the list of normalised supplier names for professional services, programmes and labour, grouping companies, subsidiaries and joint ventures under their parent group, to estimate the indirect spend for the year: $365M on contract, 26% of the recorded spend. Most of that work was cleaning: deciding which supplier names are the same company, which companies belong to the same group, and which category a line belongs to.
+In a global commodity rotation I built the list of normalised supplier names for professional services, programmes and labour, grouping companies, subsidiaries and joint ventures under their parent group, to estimate indirect on-contract spend: $365M across professional and labour services, as stated on my CV. Most of that work was cleaning: deciding which supplier names are the same company, which companies belong to the same group, and which category a line belongs to.
 
 This project automates those steps, adds the group roll-up as a first-class feature, and, unlike a spreadsheet, measures its own accuracy. **All data in this repository is synthetic**; supplier names are invented.
+
+> **Independent personal project.** I built this on my own time, after my employment ended, to show the kind of work I did professionally. It contains no code, data, documents, screenshots or other information belonging to any former employer, its customers or its suppliers. The method is rebuilt from general professional knowledge, all data in the repository is synthetic, and the only figures quoted from my career are the ones published on my CV.
 
 ## What it does
 
