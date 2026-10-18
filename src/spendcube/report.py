@@ -24,6 +24,9 @@ def render(result: Result, cube: Cube, title: str = "Indirect spend review") -> 
     env.filters["eur"] = _eur
     env.filters["eur_short"] = eur_short
     env.filters["pct"] = lambda x: f"{x:.0%}"
+    env.filters["signed_pct"] = lambda x: "new" if x != x else f"{x:+.0%}"  # NaN: no spend last year
+    env.filters["signed_eur"] = lambda n: f"{'+' if n >= 0 else '−'}€{abs(n):,.0f}"
+    env.filters["day"] = lambda iso: f"{date.fromisoformat(iso).day} {date.fromisoformat(iso):%B %Y}"
     env.filters["colour"] = coverage_colour
     font = base64.b64encode((ASSETS / "PublicSans.woff2").read_bytes()).decode()
     t = cube.totals
@@ -39,6 +42,8 @@ def render(result: Result, cube: Cube, title: str = "Indirect spend review") -> 
         .head(6)
         .to_dict("records"),
         merges=cube.merges.head(8).to_dict("records"),
+        yoy=cube.year_on_year.head(10).to_dict("records"),
+        yoy_period=t.get("yoy_period"),
         groups=cube.groups[cube.groups.members > 1].to_dict("records"),
         suggestions=result.groups.suggestions.to_dict("records"),
         scope=sorted(set(result.lines.category_group) - {"Unclassified"}),
@@ -82,6 +87,8 @@ def write_outputs(result: Result, cube: Cube, out_dir: Path, title: str = "Indir
     result.supplier_map.to_csv(out_dir / "supplier_map.csv", index=False)
     result.review.to_csv(out_dir / "review_queue.csv", index=False)
     cube.categories.to_csv(out_dir / "categories.csv", index=False)
+    if len(cube.year_on_year):
+        cube.year_on_year.to_csv(out_dir / "year_on_year.csv", index=False)
     cube.groups.assign(member_names=cube.groups.member_names.map("; ".join)).to_csv(out_dir / "groups.csv", index=False)
     return [
         out_dir / n
@@ -91,6 +98,7 @@ def write_outputs(result: Result, cube: Cube, out_dir: Path, title: str = "Indir
             "supplier_map.csv",
             "review_queue.csv",
             "categories.csv",
+            *(["year_on_year.csv"] if len(cube.year_on_year) else []),
             "groups.csv",
         ]
     ]

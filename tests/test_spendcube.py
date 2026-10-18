@@ -5,12 +5,12 @@ import httpx
 import pandas as pd
 import pytest
 
-from spendcube.analytics import build_cube
+from spendcube.analytics import build_cube, year_on_year
 from spendcube.classify import LlmClassifier, LlmConfig, apply_llm, apply_supplier_profile, classify_description
 from spendcube.evaluate import evaluate
 from spendcube.groups import GroupMapError, load_group_map, roll_up
 from spendcube.pipeline import InputError, load_fx, load_lines, run
-from spendcube.report import render
+from spendcube.report import render, write_outputs
 from spendcube.suppliers import match_suppliers
 from spendcube.text import supplier_key
 
@@ -279,3 +279,64 @@ def test_cli_runs_with_groups_and_scope(tmp_path, capsys):
     assert "in 22 groups" in out
     assert (tmp_path / "groups.csv").exists()
     assert main([*args, "--scope", "Consultng"]) == 2
+
+
+def yoy_lines(rows):
+    """rows: (date, category_id, amount, on_contract)"""
+    df = pd.DataFrame(rows, columns=["posting_date", "category_id", "amount_eur", "on_contract"])
+    df["posting_date"] = pd.to_datetime(df.posting_date)
+    df["category"] = df.category_id
+    df["category_group"] = "G"
+    return df
+
+
+class TestYearOnYear:
+    def test_compares_the_same_days_of_last_year(self):
+        df = yoy_lines(
+            [
+                ("2025-01-02", "A", 100_000, False),
+                ("2025-03-31", "A", 50_000, False),
+                ("2025-11-15", "A", 900_000, False),  # after the comparable window: ignored
+                ("2026-02-01", "A", 250_000, False),
+                ("2026-03-31", "A", 10_000, False),
+            ]
+        )
+        yoy = year_on_year(df)
+        a = yoy.iloc[0]
+        assert (a.current, a.prior, a.change_eur) == (260_000, 150_000, 110_000)
+        assert a.change == pytest.approx(260 / 150 - 1)
+        assert yoy.attrs["period"] == {"current": ("2026-01-01", "2026-03-31"), "prior": ("2025-01-01", "2025-03-31")}
+
+    def test_flags_growth_off_contract_but_not_under_contract(self):
+        df = yoy_lines(
+            [
+                ("2025-01-01", "OFF", 100_000, False),
+                ("2025-01-01", "ON", 100_000, True),
+                ("2025-01-01", "SMALL", 1_000, False),
+                ("2026-02-01", "OFF", 200_000, False),
+                ("2026-02-01", "ON", 200_000, True),
+                ("2026-02-01", "SMALL", 3_000, False),
+            ]
+        )
+        flagged = year_on_year(df).set_index("category_id").rising_off_contract
+        assert flagged.to_dict() == {"OFF": True, "ON": False, "SMALL": False}
+
+    def test_a_new_category_has_no_percentage_but_can_still_be_flagged(self):
+        df = yoy_lines([("2025-01-01", "OLD", 10, True), ("2026-02-01", "NEW", 80_000, False)])
+        new = year_on_year(df).set_index("category_id").loc["NEW"]
+        assert pd.isna(new.change)
+        assert bool(new.rising_off_contract)
+
+    def test_leaves_it_out_without_a_full_prior_period(self):
+        df = yoy_lines([("2025-02-01", "A", 100, False), ("2026-02-01", "A", 200, False)])
+        assert year_on_year(df).empty
+
+    def test_sample_report_shows_the_section_and_writes_the_extract(self, result, tmp_path):
+        cube = build_cube(result.lines, result.supplier_map)
+        assert cube.totals["yoy_period"]["current"] == ("2026-01-01", "2026-09-29")
+        assert cube.year_on_year.change_eur.abs().is_monotonic_decreasing
+        html = render(result, cube)
+        assert "Year on year" in html and "Same days last year" in html
+        files = write_outputs(result, cube, tmp_path)
+        assert tmp_path / "year_on_year.csv" in files
+        assert len(pd.read_csv(tmp_path / "year_on_year.csv")) == len(cube.year_on_year)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import duckdb
 import pandas as pd
@@ -17,6 +17,8 @@ class Cube:
     quarters: pd.DataFrame
     merges: pd.DataFrame
     groups: pd.DataFrame
+    #: Year to date against the same days of the previous year, per category. Empty without a full prior period.
+    year_on_year: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def build_cube(lines: pd.DataFrame, supplier_map: pd.DataFrame, membership: pd.DataFrame | None = None) -> Cube:
@@ -177,7 +179,75 @@ def build_cube(lines: pd.DataFrame, supplier_map: pd.DataFrame, membership: pd.D
         ).fetchone()[0]
     )
     con.close()
-    return Cube(totals, categories, suppliers, pareto, quarters, merges, groups)
+    yoy = year_on_year(lines)
+    totals["yoy_period"] = yoy.attrs.get("period")
+    totals["yoy_rising_off_contract"] = int(yoy.rising_off_contract.sum()) if len(yoy) else 0
+    return Cube(totals, categories, suppliers, pareto, quarters, merges, groups, yoy)
+
+
+#: A category "rises off contract" when it grows by at least this much...
+RISE_EUR = 50_000
+RISE_SHARE = 0.25
+#: ...while less than this share of this year's spend is on contract.
+OFF_CONTRACT_BELOW = 0.5
+
+
+def year_on_year(lines: pd.DataFrame) -> pd.DataFrame:
+    """Spend this year to date against the same days of last year, per category.
+
+    Comparing like-for-like days avoids reading seasonality as growth. Returns an
+    empty frame when the data does not start in January of last year.
+    """
+    columns = [
+        "category_id",
+        "category",
+        "category_group",
+        "current",
+        "prior",
+        "change_eur",
+        "change",
+        "on_contract_share",
+        "rising_off_contract",
+    ]
+    dates = pd.to_datetime(lines.posting_date)
+    last = dates.max()
+    start = pd.Timestamp(year=last.year, month=1, day=1)
+    prior_start = start - pd.DateOffset(years=1)
+    prior_end = last - pd.DateOffset(years=1)
+    # The first posting of a year is rarely on 1 January, so data starting in January counts.
+    if dates.min() >= prior_start + pd.DateOffset(months=1):
+        return pd.DataFrame(columns=columns)
+
+    df = lines.assign(_date=dates)
+    df = df[df.category_id != "UNCLASSIFIED"]
+    cur = df[df._date >= start]
+    pri = df[(df._date >= prior_start) & (df._date <= prior_end)]
+    keys = ["category_id", "category", "category_group"]
+    out = (
+        pd.DataFrame(
+            {
+                "current": cur.groupby(keys).amount_eur.sum(),
+                "prior": pri.groupby(keys).amount_eur.sum(),
+                "contract": cur[cur.on_contract].groupby(keys).amount_eur.sum(),
+            }
+        )
+        .fillna(0.0)
+        .reset_index()
+    )
+    out["change_eur"] = out.current - out.prior
+    out["change"] = (out.current / out.prior.where(out.prior > 0)) - 1
+    out["on_contract_share"] = (out.contract / out.current.where(out.current > 0)).fillna(0.0)
+    out["rising_off_contract"] = (
+        (out.change_eur >= RISE_EUR)
+        & (out.change.fillna(float("inf")) >= RISE_SHARE)
+        & (out.on_contract_share < OFF_CONTRACT_BELOW)
+    )
+    out = out[columns].sort_values("change_eur", key=abs, ascending=False).reset_index(drop=True)
+    out.attrs["period"] = {
+        "current": (start.date().isoformat(), last.date().isoformat()),
+        "prior": (prior_start.date().isoformat(), prior_end.date().isoformat()),
+    }
+    return out
 
 
 MATERIAL_EUR = 100_000

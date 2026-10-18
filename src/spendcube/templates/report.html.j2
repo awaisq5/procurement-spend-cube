@@ -204,6 +204,31 @@ footer a { color: var(--ink); }
     </div>
   </section>
 
+  {% if yoy %}
+  <section>
+    <h2>Year on year</h2>
+    <p class="lede">Spend from {{ yoy_period.current[0]|day }} to {{ yoy_period.current[1]|day }} against the same days a year earlier, largest changes first. Comparing the same days keeps seasonal swings out of it. {% if t.yoy_rising_off_contract %}<strong>{{ t.yoy_rising_off_contract }} {{ "category is" if t.yoy_rising_off_contract == 1 else "categories are" }} growing fast with most spend off contract</strong>, which is where a sourcing event pays first.{% endif %}</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Category</th><th class="n">This year</th><th class="n">Same days last year</th><th class="n">Change</th><th class="n">On contract</th></tr>
+        </thead>
+        <tbody>
+          {% for y in yoy %}
+          <tr>
+            <td>{{ y.category }}<span class="sub">{{ y.category_group }}{% if y.rising_off_contract %} · growing off contract{% endif %}</span></td>
+            <td class="n">{{ y.current|eur }}</td>
+            <td class="n">{{ y.prior|eur }}</td>
+            <td class="n{% if y.rising_off_contract %} up{% endif %}">{{ y.change_eur|signed_eur }}<span class="sub">{{ y.change|signed_pct }}</span></td>
+            <td class="n">{{ y.on_contract_share|pct }}<span class="cov" aria-hidden="true"><span style="width: {{ (y.on_contract_share * 100)|round(1) }}%"></span></span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="two">
     <div>
       <h2>One supplier, many names</h2>
