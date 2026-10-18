@@ -39,9 +39,9 @@ The language model layer is built to be safe to point at real company data:
 
 Every line records which layer classified it and with what confidence.
 
-**4. Builds the cube in DuckDB.** SQL computes contract coverage, concentration (HHI) per category at supplier and at group level, the supplier Pareto curve, the long tail, and leakage: spend outside contracts in categories where a contract exists.
+**4. Builds the cube in DuckDB.** SQL computes contract coverage, concentration (HHI) per category at supplier and at group level, the supplier Pareto curve, the long tail, and leakage: spend outside contracts in categories where a contract exists. It also compares this year to date with the same days of last year, per category, and flags categories that grew by €50,000 and 25% or more with less than half their spend on contract: spend rising where the company has the least leverage.
 
-**5. Writes a report** as one self-contained HTML file (charts are hand-built SVG, the font is embedded), plus CSV extracts: classified lines, supplier map, groups, categories and a review queue sorted by value. `--scope "Professional services,Labour"` limits the cube to chosen category groups, as for a PSP and labour review.
+**5. Writes a report** as one self-contained HTML file (charts are hand-built SVG, the font is embedded), plus CSV extracts: classified lines, supplier map, groups, categories, year on year and a review queue sorted by value. `--scope "Professional services,Labour"` limits the cube to chosen category groups, as for a PSP and labour review.
 
 ## How accurate is it?
 
