@@ -1,6 +1,6 @@
 # Procurement spend cube
 
-**Live report:** https://awaisq5.github.io/procurement-spend-cube/
+**Live report:** https://awaisq5.github.io/procurement-spend-cube/ · **Sample workbook:** [spend_cube.xlsx](https://awaisq5.github.io/procurement-spend-cube/spend_cube.xlsx)
 
 Before a procurement team can negotiate, it needs to know what it buys and from whom. ERP exports rarely say: one supplier appears under five spellings, line descriptions read "Services as per PO", and amounts arrive in four currencies. This project turns such an export into a **spend cube** (spend by category, supplier and quarter) and a report that says where to act first.
 
@@ -41,7 +41,7 @@ Every line records which layer classified it and with what confidence.
 
 **4. Builds the cube in DuckDB.** SQL computes contract coverage, concentration (HHI) per category at supplier and at group level, the supplier Pareto curve, the long tail, and leakage: spend outside contracts in categories where a contract exists. It also compares this year to date with the same days of last year, per category, and flags categories that grew by €50,000 and 25% or more with less than half their spend on contract: spend rising where the company has the least leverage.
 
-**5. Writes a report** as one self-contained HTML file (charts are hand-built SVG, the font is embedded), plus CSV extracts: classified lines, supplier map, groups, categories, year on year and a review queue sorted by value. `--scope "Professional services,Labour"` limits the cube to chosen category groups, as for a PSP and labour review.
+**5. Writes a report** as one self-contained HTML file (charts are hand-built SVG, the font is embedded), plus one Excel workbook (`spend_cube.xlsx`, a formatted sheet per extract, for category managers) and the same extracts as CSV for scripts: classified lines, supplier map, groups, categories, year on year and a review queue sorted by value. `--scope "Professional services,Labour"` limits the cube to chosen category groups, as for a PSP and labour review.
 
 ## How accurate is it?
 
