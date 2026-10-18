@@ -11,6 +11,7 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from .analytics import Cube
 from .charts import coverage_colour, eur_short, pareto_svg, source_bar, treemap_svg
 from .pipeline import Result
+from .workbook import LINE_COLUMNS, write_workbook
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 
@@ -65,35 +66,19 @@ def write_outputs(result: Result, cube: Cube, out_dir: Path, title: str = "Indir
     }
     for name, text in files.items():
         (out_dir / name).write_text(text, encoding="utf-8")
-    columns = [
-        "po_number",
-        "posting_date",
-        "supplier_id",
-        "supplier",
-        "supplier_name",
-        "supplier_country",
-        "description",
-        "amount",
-        "currency",
-        "amount_eur",
-        "category_id",
-        "category",
-        "category_group",
-        "confidence",
-        "source",
-        "on_contract",
-    ]
-    result.lines[columns].to_csv(out_dir / "classified_lines.csv", index=False)
+    result.lines[LINE_COLUMNS].to_csv(out_dir / "classified_lines.csv", index=False)
     result.supplier_map.to_csv(out_dir / "supplier_map.csv", index=False)
     result.review.to_csv(out_dir / "review_queue.csv", index=False)
     cube.categories.to_csv(out_dir / "categories.csv", index=False)
     if len(cube.year_on_year):
         cube.year_on_year.to_csv(out_dir / "year_on_year.csv", index=False)
     cube.groups.assign(member_names=cube.groups.member_names.map("; ".join)).to_csv(out_dir / "groups.csv", index=False)
+    write_workbook(result, cube, out_dir / "spend_cube.xlsx")
     return [
         out_dir / n
         for n in [
             "index.html",
+            "spend_cube.xlsx",
             "classified_lines.csv",
             "supplier_map.csv",
             "review_queue.csv",

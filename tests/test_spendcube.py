@@ -340,3 +340,43 @@ class TestYearOnYear:
         files = write_outputs(result, cube, tmp_path)
         assert tmp_path / "year_on_year.csv" in files
         assert len(pd.read_csv(tmp_path / "year_on_year.csv")) == len(cube.year_on_year)
+
+
+class TestWorkbook:
+    def test_one_workbook_with_a_formatted_sheet_per_extract(self, result, tmp_path):
+        from openpyxl import load_workbook
+
+        cube = build_cube(result.lines, result.supplier_map)
+        files = write_outputs(result, cube, tmp_path)
+        assert tmp_path / "spend_cube.xlsx" in files
+        wb = load_workbook(tmp_path / "spend_cube.xlsx")
+        assert wb.sheetnames == [
+            "Summary",
+            "Categories",
+            "Year on year",
+            "Suppliers",
+            "Groups",
+            "Review queue",
+            "Classified lines",
+        ]
+        for ws in wb:
+            assert ws.freeze_panes == "A2"
+            assert ws.auto_filter.ref is not None
+
+        cats = wb["Categories"]
+        header = [c.value for c in cats[1]]
+        spend = header.index("spend") + 1
+        share = header.index("on_contract_share") + 1
+        assert cats.cell(row=2, column=spend).number_format.startswith("#,##0")
+        assert cats.cell(row=2, column=share).number_format == "0%"
+        assert sum(
+            r[0] for r in cats.iter_rows(min_row=2, min_col=spend, max_col=spend, values_only=True)
+        ) == pytest.approx(cube.categories.spend.sum())
+
+        lines = wb["Classified lines"]
+        assert lines.max_row - 1 == len(result.lines)
+        assert lines.cell(row=2, column=2).number_format == "yyyy-mm-dd"
+
+        summary = {r[0]: r[1] for r in wb["Summary"].iter_rows(min_row=2, values_only=True)}
+        assert summary["Spend"] == pytest.approx(cube.totals["spend"])
+        assert summary["Lines"] == len(result.lines)
